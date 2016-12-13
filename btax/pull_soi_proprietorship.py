@@ -13,6 +13,7 @@ import os.path
 import sys
 import numpy as np
 import pandas as pd
+import re
 
 from btax.util import get_paths
 import btax.pull_soi_partner as prt
@@ -36,12 +37,9 @@ def load_proprietorship_data(entity_dfs):
     nonfarm_df.reset_index(inplace=True,drop=True)
     # Keep only variables of interest
     nonfarm_df = nonfarm_df[['Industry','Depreciation deduction [1,2]']]
-    nonfarm_df['Industry'] = nonfarm_df['Industry'].str.strip()
+    nonfarm_df['Industry'] = nonfarm_df['Industry'].apply(lambda x: re.sub('[\s+]', '',x))
     nonfarm_df.rename(columns={"Industry":"Item",
                                "Depreciation deduction [1,2]": "Depreciation"},inplace=True)
-    nonfarm_df['Depreciation'] = nonfarm_df['Depreciation']*_DDCT_FILE_FCTR
-    nonfarm_df['Item'] = nonfarm_df['Item'].str.replace(',','')
-    nonfarm_df['Item'] = nonfarm_df['Item'].str.replace('\x20\x20','\x20')
 
     # Opens the nonfarm inventory data
     nonfarm_inv = prt.format_excel(pd.read_excel(_NFARM_INV, skiprows=1, skip_footer=8))
@@ -54,15 +52,15 @@ def load_proprietorship_data(entity_dfs):
     nonfarm_inv['Net income status, item'] = nonfarm_inv['Net income status, item'].str.strip()
     nonfarm_inv.rename(columns={"Net income status, item" : "Item",
         "Inventory, end of year": "Inventories"},inplace=True)
-    nonfarm_inv['Item'] = nonfarm_inv['Item'].str.replace(',', '')
-    nonfarm_inv['Item'] = nonfarm_inv['Item'].str.replace('\x20\x20','\x20')
-
+    nonfarm_inv['Item'] = nonfarm_inv['Item'].apply(lambda x: re.sub('[\s+]', '',x))
     # merge together two sole prop data sources
     # have to manually fix a couple names to be compatible
-    nonfarm_inv.ix[nonfarm_inv['Item']=='Other ambulatory health care services (including ambulance services blood organ banks)'
-                   , 'Item'] = 'Other ambulatory health care services (including ambulance services blood and organ banks)'
-    nonfarm_inv.ix[nonfarm_inv['Item']=='Other auto repair and maintenance (including oil change lube and car washes)'
-                   , 'Item'] = 'Other auto repair and maintenance (including oil change lubrication and car washes)'
+    nonfarm_df.ix[nonfarm_df['Item']=="Otherambulatoryhealthcareservices(includingambulanceservices,bloodandorganbanks)",
+                  'Item']='Otherambulatoryhealthcareservices(includingambulanceservices,blood,organbanks)'
+    nonfarm_df.ix[nonfarm_df['Item']=="Officesofrealestateagents,brokers,propertymanagers,andappraisers",
+                  'Item']='Officesofrealestateagents,brokers,propertymanagersandappraisers'
+    nonfarm_df.ix[nonfarm_df['Item']=="OOtherautorepairandmaintenance(includingoilchange,lubrication,andcarwashes)",
+                  'Item']='Otherautorepairandmaintenance(includingoilchange,lube,andcarwashes)'
     nonfarm_df = pd.merge(nonfarm_df, nonfarm_inv, how='inner', left_on=['Item'],
       right_on=['Item'], left_index=False, right_index=False, sort=False,
       copy=True)
@@ -72,7 +70,7 @@ def load_proprietorship_data(entity_dfs):
     # keep only codes that help to identify complete industries
     xwalk = xwalk[xwalk['complete']==1]
     xwalk = xwalk[['Industry','INDY_CD']]
-    xwalk['Industry'] = xwalk['Industry'].str.strip()
+    xwalk['Industry'] = xwalk['Industry'].apply(lambda x: re.sub('[\s+]', '',x))
 
     # merge industry codes to sole prop data
     nonfarm_df = pd.merge(nonfarm_df, xwalk, how='inner', left_on=['Item'],
@@ -125,8 +123,12 @@ def load_proprietorship_data(entity_dfs):
     # inner join means that we keep only rows that match in both datasets
     # this should keep only unique soi minor industries
     columns = ['Inventories','Depreciation']
-    part_data = entity_dfs['part_data'][['minor_code_alt']+columns]
-    partner = pd.merge(part_data, soi_bea_ind_codes, how='inner', left_on=['minor_code_alt'],
+    part_data = entity_dfs['part_data'][['minor_code_alt','part_type']+columns+['Land','Fixed Assets']].copy()
+
+    # sum at industry-partner type level
+    part_data = part_data.groupby(['minor_code_alt']).sum().reset_index()
+    part2 = part_data[['minor_code_alt']+columns].copy()
+    partner = pd.merge(part2, soi_bea_ind_codes, how='inner', left_on=['minor_code_alt'],
                         right_on=['minor_code_alt'],left_index=False,
                         right_index=False, sort=False,suffixes=('_x', '_y'),
                         copy=True)
@@ -160,7 +162,7 @@ def load_proprietorship_data(entity_dfs):
     # for all industries bc some not allocated to an industry)
 
     # merge in partner data to get ratios need to impute FA's and land
-    part_ratios = entity_dfs['part_data'][['minor_code_alt','Fixed Assets','Depreciation','Land']]
+    part_ratios = part_data[['minor_code_alt','Fixed Assets','Depreciation','Land']].copy()
     part_ratios['FA_ratio'] = part_ratios['Fixed Assets']/part_ratios['Depreciation']
     part_ratios['Land_ratio'] = part_ratios['Land']/part_ratios['Fixed Assets']
     part_ratios = part_ratios[['minor_code_alt','FA_ratio','Land_ratio']]
@@ -180,7 +182,6 @@ def load_proprietorship_data(entity_dfs):
     # What about inventories for farm sole props? Worry about??
     farm_df = pd.read_csv(_FARM_IN_PATH)
     asst_land = farm_df['R_p'][0] + farm_df['Q_p'][0]
-    part_data = entity_dfs['part_data'][['minor_code_alt','Fixed Assets','Depreciation','Land']]
     land_ratio = np.array((part_data.ix[part_data['minor_code_alt']==111, 'Land']/
                   (part_data.ix[part_data['minor_code_alt']==111, 'Fixed Assets']+
                    part_data.ix[part_data['minor_code_alt']==111, 'Land'])))

@@ -20,7 +20,6 @@ DEFAULTS = json.loads(read_from_egg(os.path.join('param_defaults', 'btax_default
 DEFAULT_ASSET_COLS = json.loads(read_from_egg(os.path.join('param_defaults', 'btax_results_by_asset.json')))
 DEFAULT_INDUSTRY_COLS = json.loads(read_from_egg(os.path.join('param_defaults', 'btax_results_by_industry.json')))
 
-
 def translate_param_names(**user_mods):
     """Takes parameters names from UI and turns them into names used in btax
 
@@ -46,14 +45,11 @@ def translate_param_names(**user_mods):
                       if k not in user_mods})
     user_bonus_deprec = {cl: user_mods['btax_depr_{}yr_exp'.format(cl)]/100.
     			 for cl in class_list_str}
-    # to zero out bonus - useful for compare to CBO
-    # user_bonus_deprec = {cl: 0.for cl in class_list_str}
-    # for expensing
-    # user_bonus_deprec = {cl: 1.for cl in class_list_str}
 
 
     if user_mods['btax_betr_entity_Switch'] in (True, 'True'):
-        u_nc = user_mods['btax_betr_corp']
+        #u_nc = user_mods['btax_betr_corp']
+        u_nc = user_mods['btax_betr_pass']
     else:
         u_nc = user_mods['btax_betr_pass']
     user_params = {
@@ -86,34 +82,31 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
     f_nc = 0.29 # CBO (2014) 0.32
     f_array = np.array([[f_c, f_nc], [1, 1], [0,0]])
 
-    #calibration variables
-    omega_scg = 0.03627
-    omega_lcg = 0.48187
-    omega_xcg = 0.48187
+    #calibration variables - right now using CBO (2014)
+    omega_scg = 0.034
+    omega_lcg = 0.496
+    omega_xcg = 0.469
 
-    alpha_c_e_ft = 0.584
-    alpha_c_e_td = 0.058
-    alpha_c_e_nt = 0.358
+    alpha_c_e_ft = 0.572
+    alpha_c_e_td = 0.039
+    alpha_c_e_nt = 0.389
 
-    alpha_c_d_ft = 0.460
-    alpha_c_d_td = 0.213
-    alpha_c_d_nt = 0.327
+    alpha_c_d_ft = 0.523
+    alpha_c_d_td = 0.149
+    alpha_c_d_nt = 0.328
 
-    alpha_nc_d_ft = 0.691
-    alpha_nc_d_td = 0.142
-    alpha_nc_d_nt = 0.167
+    alpha_nc_d_ft = 0.763
+    alpha_nc_d_td = 0.101
+    alpha_nc_d_nt = 0.136
 
-    alpha_h_d_ft = 0.716
-    alpha_h_d_td = 0.071
-    alpha_h_d_nt = 0.213
+    alpha_h_d_ft = 0.779
+    alpha_h_d_td = 0.037
+    alpha_h_d_nt = 0.183
 
     #user defined variables
     user_params = translate_param_names(**user_mods)
     pi = user_params['pi']
     i = user_params['i']
-    u_c = user_params['u_c']
-    u_nc = 0.33 #0.331 # CBO(2014) user_params['u_nc']
-    u_array = np.array([u_c, u_nc])
     w = user_params['w']
     inv_credit = user_params['inv_credit']
     ace_c = user_params['ace_c']
@@ -123,6 +116,7 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
     int_haircut = user_params['int_haircut']
     bonus_deprec = user_params['bonus_deprec']
     deprec_system = user_params['deprec_system']
+    phi = 0.5 # fraction of inventories using LIFO accounting
     # we don't have IP class in user params, so put here
     bonus_deprec['50'] = 0.
     deprec_system['50'] = 'ADS'
@@ -162,19 +156,36 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
         tau_xcg = 0.00 # tax rate on capital gains held to death
         tau_td = indiv_rates['tau_td']
         tau_h = indiv_rates['tau_h']
+        # print 'tau_nc = ', tau_nc
+        # print 'tau_div = ', tau_div
+        # print 'tau_int = ', tau_int
+        # print 'tau_scg = ', tau_scg
+        # print 'tau_lcg = ', tau_lcg
+        # print 'tau_td = ', tau_td
+        # print 'tau_h = ', tau_h
 
-    # Parameters for holding periods of assets, etc.
+    # entity level tax rates - this changes how used in calculations depending on how applied
+    u_c = user_params['u_c']
+    if user_params['u_nc']==0.0:
+        u_nc = tau_nc
+    else:
+        u_nc = user_params['u_nc']
+    u_array = np.array([u_c, u_nc])
+
+    # Parameters for holding periods of assets
     Y_td = 8.
     Y_scg = 4/12.
     Y_lcg = 8.
+    Y_v = 4/12. # holding period for inventories
     gamma = 0.3
-    m = 0.4286
+
+    # Miscellaneous parameters
+    m = 0.44 # Divident payout rate
 
     #intermediate variables
     sprime_c_td = (1/Y_td)*np.log(((1-tau_td)*np.exp(i*Y_td))+tau_td)-pi
     s_c_d_td = gamma*(i-pi) + (1-gamma)*sprime_c_td
     s_c_d = alpha_c_d_ft*(((1-tau_int)*i)-pi) + alpha_c_d_td*s_c_d_td + alpha_c_d_nt*(i-pi)
-
     s_nc_d_td = s_c_d_td
     s_nc_d = alpha_nc_d_ft*(((1-tau_int)*i)-pi) + alpha_nc_d_td*s_nc_d_td + alpha_nc_d_nt*(i-pi)
 
@@ -192,9 +203,18 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
     s_nc_e = E_nc
     s_nc = f_nc*s_nc_d + (1-f_nc)*s_nc_e
     s_array = np.array([[s_c, s_nc], [s_c_d, s_nc_d], [s_c_e, s_nc_e]])
-
     r = f_array*(i*(1-(1-int_haircut)*u_array))+(1-f_array)*(E_array+pi - E_array*r_ace*ace_array)
     r_prime = f_array*i+(1-f_array)*(E_array+pi)
+    # if no entity level taxes on pass-throughs, ensure mettr and metr on non-corp entities the same
+    if user_params['u_nc'] == 0.0:
+        r_prime[:,1] = s_array[:,1] + pi
+        if int_haircut != 0:
+            r[:,1] = (f_array*(i*(1-u_array))+(1-f_array)*(E_array+pi - E_array*r_ace*ace_array))[:,1]
+    # If entity level tax, assume distribute earnings at same rate corps distribute
+    # dividends and these are taxed at dividends tax rate (which seems likely, but
+    # leaves no role for non-corp income rate)
+    else:
+        s_array[:,1] = s_array[:,0]
     delta = get_econ_depr()
     tax_methods = {'GDS 200%': 2.0, 'GDS 150%': 1.5, 'GDS SL': 1.0, 'ADS SL': 1.0}
     financing_list = ['', '_d', '_e']
@@ -237,9 +257,11 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
           'Other Equipment'))
     asset_dict.update(dict.fromkeys(['Residential'],
           'Residential Buildings'))
-    asset_dict.update(dict.fromkeys(['Manufacturing','Office','Hospitals','Special care','Medical buildings','Multimerchandise shopping',
+    asset_dict.update(dict.fromkeys(['Manufacturing','Office','Hospitals',
+          'Special care','Medical buildings','Multimerchandise shopping',
           'Food and beverage establishments','Warehouses','Other commercial',
-          'Air transportation','Other transportation','Religious','Educational and vocational','Lodging','Public safety'],
+          'Air transportation','Other transportation','Religious',
+          'Educational and vocational','Lodging','Public safety'],
           'Nonresidential Buildings'))
     asset_dict.update(dict.fromkeys(['Gas','Petroleum pipelines','Communication',
           'Petroleum and natural gas','Mining'],'Mining and Drilling Structures'))
@@ -259,6 +281,45 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
           'Private universities and colleges','Other nonprofit institutions','Theatrical movies','Long-lived television programs',
           'Books','Music','Other entertainment originals'],'Intellectual Property'))
 
+    # major asset groups
+    #major_asset_groups = {'Equipment','Structures','Intellectual Property','Inventories','Land'}
+    major_asset_groups = dict.fromkeys(['Mainframes','PCs','DASDs','Printers',
+          'Terminals','Tape drives','Storage devices','System integrators',
+          'Prepackaged software','Custom software','Own account software',
+          'Communications','Nonelectro medical instruments',
+          'Electro medical instruments','Nonmedical instruments','Photocopy and related equipment',
+          'Office and accounting equipment','Household furniture','Other furniture',
+          'Household appliances','Light trucks (including utility vehicles)',
+          'Other trucks, buses and truck trailers','Autos','Aircraft',
+          'Ships and boats','Railroad equipment','Steam engines',
+          'Internal combustion engines','Special industrial machinery',
+          'General industrial equipment','Nuclear fuel','Other fabricated metals',
+          'Metalworking machinery','Electric transmission and distribution',
+          'Other agricultural machinery','Farm tractors','Other construction machinery',
+          'Construction tractors','Mining and oilfield machinery',
+          'Service industry machinery','Other electrical','Other'],'Equipment')
+    major_asset_groups.update(dict.fromkeys(['Residential','Manufacturing',
+          'Office','Hospitals','Special care','Medical buildings','Multimerchandise shopping',
+          'Food and beverage establishments','Warehouses','Other commercial',
+          'Air transportation','Other transportation','Religious',
+          'Educational and vocational','Lodging','Public safety','Gas',
+          'Petroleum pipelines','Communication',
+          'Petroleum and natural gas','Mining','Electric','Wind and solar',
+          'Amusement and recreation',
+          'Other railroad','Track replacement','Local transit structures',
+          'Other land transportation','Farm','Water supply','Sewage and waste disposal',
+          'Highway and conservation and development','Mobile structures'],'Structures'))
+    major_asset_groups.update(dict.fromkeys(['Pharmaceutical and medicine manufacturing',
+          'Chemical manufacturing, ex. pharma and med','Semiconductor and other component manufacturing',
+          'Computers and peripheral equipment manufacturing','Communications equipment manufacturing',
+          'Navigational and other instruments manufacturing','Other computer and electronic manufacturing, n.e.c.',
+          'Motor vehicles and parts manufacturing','Aerospace products and parts manufacturing',
+          'Other manufacturing','Scientific research and development services','Software publishers',
+          'Financial and real estate services','Computer systems design and related services','All other nonmanufacturing, n.e.c.',
+          'Private universities and colleges','Other nonprofit institutions','Theatrical movies','Long-lived television programs',
+          'Books','Music','Other entertainment originals'],'Intellectual Property'))
+    major_asset_groups.update(dict.fromkeys(['Inventories'],'Inventories'))
+    major_asset_groups.update(dict.fromkeys(['Land'],'Land'))
     # define major industry groupings
     major_industries = {'Agriculture, forestry, fishing, and hunting', 'Mining',
       'Utilities', 'Construction',
@@ -336,7 +397,40 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
     ind_dict.update(dict.fromkeys(['Other services, except government'],
                           'Other services, except government'))
 
-
+    bea_code_dict = dict.fromkeys(['110C','113F'],
+                              'Agriculture, forestry, fishing, and hunting')
+    bea_code_dict.update(dict.fromkeys(['2110','2120','2130'],'Mining'))
+    bea_code_dict.update(dict.fromkeys(['2200'],'Utilities'))
+    bea_code_dict.update(dict.fromkeys(['2300'],'Construction'))
+    bea_code_dict.update(dict.fromkeys(['3210','3270','3310','3320','3330','3340',
+                        '3350','336M','336O','3370','338A','311A','313T','315A',
+                        '3220','3230','3240','3250','3260'],'Manufacturing'))
+    bea_code_dict.update(dict.fromkeys(['4200'],'Wholesale trade'))
+    bea_code_dict.update(dict.fromkeys(['44RT'],'Retail trade'))
+    bea_code_dict.update(dict.fromkeys(['4810','4820','4830','4840','4850','4860',
+                        '487S','4930'],'Transportation and warehousing'))
+    bea_code_dict.update(dict.fromkeys(['5110','5120','5130','5140'],
+                                  'Information'))
+    bea_code_dict.update(dict.fromkeys(['5210','5220','5230','5240','5250'],
+                          'Finance and insurance'))
+    bea_code_dict.update(dict.fromkeys(['5310','5320'],
+                          'Real estate and rental and leasing'))
+    bea_code_dict.update(dict.fromkeys(['5411','5415','5412'],
+                          'Professional, scientific, and technical services'))
+    bea_code_dict.update(dict.fromkeys(['5500'],
+                          'Management of companies and enterprises'))
+    bea_code_dict.update(dict.fromkeys(['5610','5620'],
+                          'Administrative and waste management services'))
+    bea_code_dict.update(dict.fromkeys(['6100'],
+                          'Educational services'))
+    bea_code_dict.update(dict.fromkeys(['6210','622H','6230','6240'],
+                          'Health care and social assistance'))
+    bea_code_dict.update(dict.fromkeys(['711A','7130'],
+                          'Arts, entertainment, and recreation'))
+    bea_code_dict.update(dict.fromkeys(['7210','7220'],
+                          'Accommodation and food services'))
+    bea_code_dict.update(dict.fromkeys(['8100'],
+                          'Other services, except government'))
 
     parameters = {'inflation rate': pi,
         'econ depreciation': delta,
@@ -352,7 +446,11 @@ def get_params(test_run,baseline,start_year,iit_reform,**user_mods):
         'financing_list':financing_list,
         'entity_list':entity_list,
         'delta': delta,
+        'Y_v':Y_v,
+        'phi':phi,
         'asset_dict': asset_dict,
-        'ind_dict': ind_dict
+        'ind_dict': ind_dict,
+        'major_asset_groups': major_asset_groups,
+        'bea_code_dict': bea_code_dict
     }
     return parameters
